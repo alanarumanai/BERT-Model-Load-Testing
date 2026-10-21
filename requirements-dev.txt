@@ -4,3 +4,4 @@ httpx
 ruff
 locust
 py-spy
+psutil
