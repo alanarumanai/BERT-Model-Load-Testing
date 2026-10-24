@@ -1,0 +1,141 @@
+name: CI
+
+# When to run: pushes to main, every pull request, and manually from the Actions tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# If a newer run starts for the same branch or pull request, cancel the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# The workflow only needs to read the repository.
+permissions:
+  contents: read
+
+# Shared settings for every job. .env is not committed, so the model is chosen here.
+env:
+  PYTHON_VERSION: "3.11"
+  APP_MODEL_NAME: distilbert/distilbert-base-uncased-finetuned-sst-2-english
+  # Replace "main" with the commit hash you pinned in Phase 1.
+  APP_MODEL_REVISION: 714eb0fa89d2f80546fda750413ed43d93601a13
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  # Fast feedback on style and simple bugs. Needs only Ruff, not torch or the model.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Ruff (the version pinned in requirements-dev.txt)
+        run: python -m pip install "$(grep -iE '^ruff' requirements-dev.txt)"
+
+      - name: Check for errors
+        # The github output format shows problems as annotations on the changed lines.
+        run: ruff check --output-format=github .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+  # The full test suite against the real model.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Python (with a pip download cache)
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          # The cache is reused until one of these files changes.
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: bash scripts/install_deps.sh --dev
+
+      - name: Restore the model cache
+        id: model-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          # A new revision means a new key, so the model is downloaded again.
+          key: hf-${{ env.APP_MODEL_NAME }}-${{ env.APP_MODEL_REVISION }}
+
+      - name: Download the model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: python scripts/download_model.py
+
+      - name: Run tests with coverage
+        env:
+          HF_HUB_OFFLINE: "1"
+        run: >-
+          pytest
+          --cov=app
+          --cov-report=term-missing
+          --cov-report=xml
+          --junitxml=test-results.xml
+
+      - name: Add the coverage table to the run summary
+        if: always()
+        run: python -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            coverage.xml
+            test-results.xml
+          if-no-files-found: ignore
+
+  # Start the real service under Gunicorn and check it end to end.
+  smoke:
+    name: Server smoke test
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Python (with a pip download cache)
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install runtime dependencies
+        run: bash scripts/install_deps.sh
+
+      - name: Restore the model cache
+        id: model-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ env.APP_MODEL_NAME }}-${{ env.APP_MODEL_REVISION }}
+
+      - name: Download the model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: python scripts/download_model.py
+
+      - name: Run the smoke test
+        run: bash scripts/smoke_test.sh
+

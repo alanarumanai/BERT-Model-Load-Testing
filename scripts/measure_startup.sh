@@ -7,10 +7,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
+
+# A server that is already running would answer the health check instantly and
+# make the measurement meaningless (and the new server couldn't bind the port).
+if curl -s -o /dev/null --max-time 2 "$HEALTH_URL"; then
+  echo "ERROR: something is already answering at $HEALTH_URL."
+  echo "Stop the running server (Ctrl+C in its terminal) and run this script again."
+  exit 1
+fi
+
 LOG="$(mktemp)"
 
 start=$(date +%s.%N)
-scripts/run_server.sh "${1:-}" >"$LOG" 2>&1 &
+bash scripts/run_server.sh "${1:-}" >"$LOG" 2>&1 &
 MASTER=$!    # run_server.sh uses exec, so this is the Gunicorn master's PID
 trap 'kill "$MASTER" 2>/dev/null || true; wait "$MASTER" 2>/dev/null || true; rm -f "$LOG"' EXIT
 
@@ -24,9 +33,11 @@ done
 first_ready=$(date +%s.%N)
 
 # 2. Wait until every worker has logged that its model is loaded.
-expected=$(grep -oE 'Starting [0-9]+ worker' "$LOG" | grep -oE '[0-9]+' | head -1)
+expected=$(grep -oE 'Starting [0-9]+ worker' "$LOG" | grep -oE '[0-9]+' | head -1 || true)
+[[ -n "$expected" ]] || fail "could not find the 'Starting N worker(s)' line in the server log"
 deadline=$((SECONDS + 300))
-while (( $(grep -c 'Loaded ' "$LOG") < expected )); do
+while (( $(grep -c 'Loaded ' "$LOG" || true) < expected )); do
+  kill -0 "$MASTER" 2>/dev/null || fail "server exited during startup"
   (( SECONDS < deadline )) || fail "not all workers loaded within 300s"
   sleep 0.2
 done
