@@ -6,3 +6,4 @@ settings.json
 tasks.json
 .coverage
 loadtests/results/
+profiling/results/

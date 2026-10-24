@@ -10,3 +10,6 @@ ruff
 # Load testing (Phase 6)
 locust
 psutil
+# Profiling and accuracy checks (Phase 7)
+py-spy
+datasets

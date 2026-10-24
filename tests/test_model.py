@@ -1,6 +1,14 @@
-"""The real model wrapper: labels, predictions, probabilities, batching, truncation."""
+"""The real model wrapper: labels, predictions, probabilities, batching, truncation,
+and the Phase 7 options (stages, concurrency limit, quantization)."""
+
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+
+from app.config import get_settings
+from app.model import SentimentClassifier
 
 POSITIVE_TEXTS = [
     "This movie was absolutely wonderful, I loved every minute of it.",
@@ -81,3 +89,75 @@ def test_predictions_are_deterministic(classifier):
     second = classifier.predict([NEGATIVE_TEXTS[1]])[0]
     for label in classifier.labels:
         assert second.scores[label] == pytest.approx(first.scores[label], abs=1e-6)
+
+
+def test_stages_together_match_predict(classifier):
+    # Profiling times tokenize, forward and postprocess separately; together they
+    # must give exactly what predict() returns.
+    text = POSITIVE_TEXTS[0]
+    staged = classifier.postprocess(classifier.forward(classifier.tokenize([text])))[0]
+    direct = classifier.predict([text])[0]
+    assert staged.label == direct.label
+    assert staged.score == pytest.approx(direct.score, abs=1e-6)
+
+
+def _peak_concurrency(classifier, monkeypatch, slots):
+    """Run 4 predictions from 4 threads and return how many ran at the same time."""
+    active = peak = 0
+    lock = threading.Lock()
+    real_predict = classifier._predict
+
+    def tracked(texts):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)  # make overlapping calls likely
+        try:
+            return real_predict(texts)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(classifier, "_predict", tracked)
+    monkeypatch.setattr(classifier, "_slots", slots)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda text: classifier.predict([text]), POSITIVE_TEXTS * 2))
+    assert len(results) == 4
+    return peak
+
+
+def test_without_limit_predictions_overlap(classifier, monkeypatch):
+    # Shows the next test is meaningful: with no limit, calls do run concurrently.
+    assert _peak_concurrency(classifier, monkeypatch, slots=None) > 1
+
+
+def test_concurrency_limit_runs_one_prediction_at_a_time(classifier, monkeypatch):
+    assert _peak_concurrency(classifier, monkeypatch, threading.BoundedSemaphore(1)) == 1
+
+
+@pytest.fixture(scope="module")
+def quantized_classifier():
+    settings = get_settings()
+    return SentimentClassifier(
+        model_name=settings.model_name,
+        revision=settings.model_revision,
+        max_length=settings.max_length,
+        quantize=True,
+    )
+
+
+def test_quantized_model_uses_int8_layers(quantized_classifier):
+    assert quantized_classifier.model_id.endswith("+int8")
+    quantized_layers = [
+        m for m in quantized_classifier.model.modules() if "quantized" in type(m).__module__
+    ]
+    assert quantized_layers, "no quantized layers found"
+
+
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [(t, "POSITIVE") for t in POSITIVE_TEXTS] + [(t, "NEGATIVE") for t in NEGATIVE_TEXTS],
+)
+def test_quantized_model_still_classifies_correctly(quantized_classifier, text, label):
+    assert quantized_classifier.predict([text])[0].label == label

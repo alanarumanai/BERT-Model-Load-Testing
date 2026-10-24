@@ -20,6 +20,7 @@
 #   SOAK_USERS        users for the soak run                    (default: 8)
 #   SOAK_DURATION     length of the soak run                    (default: 15m)
 #   COOLDOWN          idle seconds between runs                 (default: 10)
+#   RESULTS_ROOT      folder to create the session in           (default: loadtests/results)
 #   Any GUNICORN_* or APP_* variable is passed to the server, e.g. GUNICORN_WORKERS=4.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -38,6 +39,7 @@ SPIKE_STAGE_SECONDS="${SPIKE_STAGE_SECONDS:-60}"
 SOAK_USERS="${SOAK_USERS:-8}"
 SOAK_DURATION="${SOAK_DURATION:-15m}"
 COOLDOWN="${COOLDOWN:-10}"
+RESULTS_ROOT="${RESULTS_ROOT:-loadtests/results}"
 HOST="${HOST:-http://127.0.0.1:8000}"
 SCENARIOS=("$@")
 [[ ${#SCENARIOS[@]} -gt 0 ]] || SCENARIOS=(step length spike soak)
@@ -56,7 +58,7 @@ fi
 PIN_LOCUST=()
 [[ -n "$LOCUST_CPUS" ]] && PIN_LOCUST=(taskset -c "$LOCUST_CPUS")
 
-SESSION="loadtests/results/$(date +%Y%m%d-%H%M%S)_${LABEL}"
+SESSION="$RESULTS_ROOT/$(date +%Y%m%d-%H%M%S)_${LABEL}"
 mkdir -p "$SESSION/environment" "$SESSION/runs"
 echo "Results folder: $SESSION"
 
@@ -66,11 +68,11 @@ echo "Results folder: $SESSION"
   echo "scenarios: ${SCENARIOS[*]}"
   for var in LABEL SERVER_CPUS LOCUST_CPUS USER_LEVELS STEP_DURATION REPEATS LENGTH_USERS \
              LENGTH_DURATION SPIKE_BASE_USERS SPIKE_PEAK_USERS SPIKE_STAGE_SECONDS \
-             SOAK_USERS SOAK_DURATION COOLDOWN HOST; do
+             SOAK_USERS SOAK_DURATION COOLDOWN HOST RESULTS_ROOT; do
     echo "$var=${!var}"
   done
   echo "--- server and model settings from the environment ---"
-  env | grep -E '^(GUNICORN_|APP_|HF_|TOKENIZERS_)' | sort || true
+  env | grep -E '^(GUNICORN_|APP_|HF_|TOKENIZERS_|OMP_|KMP_|GOMP_|MKL_)' | sort || true
 } > "$SESSION/environment/settings.txt"
 [[ -f .env ]] && grep -E '^[[:space:]]*APP_' .env > "$SESSION/environment/dotenv_app_settings.txt" || true
 lscpu > "$SESSION/environment/lscpu.txt" 2>&1 || true
@@ -85,6 +87,8 @@ python -m pip freeze > "$SESSION/environment/pip-freeze.txt"
 } > "$SESSION/environment/git.txt"
 
 # --- 2. Start the server and wait until every worker has loaded the model -------------
+# Each worker logs "Application startup complete" once its lifespan (model loading) is
+# done. That line comes from Gunicorn/Uvicorn, so it appears whatever APP_LOG_LEVEL is.
 bash scripts/run_server.sh "$SERVER_CPUS" > "$SESSION/server.log" 2>&1 &
 MASTER=$!   # run_server.sh uses exec, so this is the Gunicorn master's PID
 MONITOR=""
@@ -103,7 +107,7 @@ until curl -sf "$HOST/health" >/dev/null; do
   sleep 1
 done
 expected=$(grep -oE 'Starting [0-9]+ worker' "$SESSION/server.log" | grep -oE '[0-9]+' | head -1 || true)
-while (( $(grep -c 'Loaded ' "$SESSION/server.log" || true) < ${expected:-1} )); do
+while (( $(grep -c 'Application startup complete' "$SESSION/server.log" || true) < ${expected:-1} )); do
   (( SECONDS < deadline )) || fail "not all workers loaded within 300s"
   sleep 1
 done

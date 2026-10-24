@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # (all cores), which oversubscribes the CPU when several workers run.
     torch_num_threads: int | None = Field(default=None, ge=1)
 
+    # Phase 7 experiments, both off by default.
+    # Convert the model's Linear layers to 8-bit integers (dynamic quantization).
+    quantize: bool = False
+    # At most this many predictions run at once in each worker; extra requests wait
+    # their turn. None means no limit (FastAPI's thread pool runs them in parallel).
+    max_concurrent_predictions: int | None = Field(default=None, ge=1)
+
     log_level: str = "INFO"
 
 

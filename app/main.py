@@ -29,8 +29,10 @@ async def lifespan(app: FastAPI):
         level=settings.log_level.upper(),
         format="%(asctime)s %(levelname)s [%(process)d] %(name)s: %(message)s",
     )
-    # The Hugging Face downloader logs every HTTP call at INFO; keep it quiet.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # HTTP client libraries log every request at INFO: the Hugging Face downloader
+    # uses httpx, and FastAPI's TestClient uses httpx2. Keep them quiet.
+    for name in ("httpx", "httpx2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     app.state.classifier = None
     # Runs once per worker process, before it accepts any request.
     app.state.classifier = SentimentClassifier(
@@ -38,6 +40,8 @@ async def lifespan(app: FastAPI):
         revision=settings.model_revision,
         max_length=settings.max_length,
         num_threads=settings.torch_num_threads,
+        quantize=settings.quantize,
+        max_concurrent=settings.max_concurrent_predictions,
     )
     yield
     app.state.classifier = None

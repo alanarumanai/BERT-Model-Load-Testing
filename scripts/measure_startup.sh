@@ -32,11 +32,12 @@ until curl -sf "$HEALTH_URL" >/dev/null; do
 done
 first_ready=$(date +%s.%N)
 
-# 2. Wait until every worker has logged that its model is loaded.
+# 2. Wait until every worker has finished starting up ("Application startup complete",
+#    logged by Gunicorn/Uvicorn whatever APP_LOG_LEVEL is).
 expected=$(grep -oE 'Starting [0-9]+ worker' "$LOG" | grep -oE '[0-9]+' | head -1 || true)
 [[ -n "$expected" ]] || fail "could not find the 'Starting N worker(s)' line in the server log"
 deadline=$((SECONDS + 300))
-while (( $(grep -c 'Loaded ' "$LOG" || true) < expected )); do
+while (( $(grep -c 'Application startup complete' "$LOG" || true) < expected )); do
   kill -0 "$MASTER" 2>/dev/null || fail "server exited during startup"
   (( SECONDS < deadline )) || fail "not all workers loaded within 300s"
   sleep 0.2
@@ -48,7 +49,7 @@ echo "=== Startup ==="
 grep -m1 'Starting [0-9]* worker' "$LOG" | sed 's/.*\] //'
 awk -v s="$start" -v a="$first_ready" -v b="$all_ready" 'BEGIN {
   printf "First worker ready (health 200): %.1f s\nAll workers ready:               %.1f s\n", a-s, b-s }'
-echo "Per-worker model load (from logs):"
+echo "Per-worker model load (from the app's INFO logs; empty if APP_LOG_LEVEL hides them):"
 grep 'Loaded ' "$LOG" | sed -E 's/.*\[([0-9]+)\].*Loaded .* in ([0-9.]+s).*torch threads=([0-9]+).*/  worker \1: \2, torch threads=\3/'
 
 echo

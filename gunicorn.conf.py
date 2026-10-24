@@ -72,10 +72,35 @@ accesslog = os.getenv("GUNICORN_ACCESS_LOG") or None
 worker_tmp_dir = "/dev/shm" if os.path.isdir("/dev/shm") else None
 
 
+def _allow_profiler_attach(log) -> None:
+    """Let a profiler running as the same user attach to this process (for py-spy).
+
+    Many Linux systems set kernel.yama.ptrace_scope=1, which only lets a process be
+    inspected by its own parent. PR_SET_PTRACER_ANY lifts that for this one process,
+    so profiling/profile_server.sh can attach py-spy without sudo. It is only done
+    when ALLOW_PROFILER_ATTACH=1, and has no effect on systems without Yama.
+    """
+    if os.getenv("ALLOW_PROFILER_ATTACH") != "1":
+        return
+    import ctypes
+
+    PR_SET_PTRACER = 0x59616D61
+    PR_SET_PTRACER_ANY = ctypes.c_ulong(-1)
+    libc = ctypes.CDLL(None, use_errno=True)
+    zero = ctypes.c_ulong(0)
+    if libc.prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, zero, zero, zero) != 0:
+        log.debug("PR_SET_PTRACER not applied (errno %d)", ctypes.get_errno())
+
+
 def on_starting(server):
+    _allow_profiler_attach(server.log)  # the master
     server.log.info(
         "Starting %d worker(s), %s torch thread(s) each, on %d CPU(s)",
         workers,
         os.environ["APP_TORCH_NUM_THREADS"],
         CPUS,
     )
+
+
+def post_fork(server, worker):
+    _allow_profiler_attach(server.log)  # each worker, right after it is created
