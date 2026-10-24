@@ -1,7 +1,9 @@
+# Development and test tools. Installs the runtime dependencies too.
+# After installing, pin exact versions from `pip freeze`, as with requirements.txt.
+-r requirements.txt
 pytest
 pytest-cov
-httpx
+# Used by FastAPI's TestClient. Current Starlette versions use httpx2;
+# older ones use httpx, which is already installed as a dependency.
+httpx2
 ruff
-locust
-py-spy
-psutil

@@ -2,13 +2,19 @@
 
 import logging
 import time
+from dataclasses import dataclass
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from app.interfaces import Prediction
-
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Prediction:
+    label: str
+    score: float
+    scores: dict[str, float]
 
 
 class SentimentClassifier:
@@ -27,9 +33,7 @@ class SentimentClassifier:
         self.model_id = f"{model_name}@{revision}"
 
         # use_fast selects the Rust tokenizer, much faster than the Python one.
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, revision=revision, use_fast=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision, use_fast=True)
         self.model = AutoModelForSequenceClassification.from_pretrained(
             model_name, revision=revision
         )
@@ -80,7 +84,7 @@ class SentimentClassifier:
                 Prediction(
                     label=self.labels[best],
                     score=row[best],
-                    scores=dict(zip(self.labels, row)),
+                    scores=dict(zip(self.labels, row, strict=True)),
                 )
             )
         return predictions

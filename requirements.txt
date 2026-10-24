@@ -1,7 +1,10 @@
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpufastapi
-uvicorn
-gunicorn
-transformers
+# Runtime dependencies.
+# Install CPU-only torch first:
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 torch
-pydantic-settings
+transformers
+fastapi
+uvicorn[standard]
 uvicorn-worker
+gunicorn
+pydantic-settings

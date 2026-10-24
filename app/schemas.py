@@ -40,9 +40,7 @@ class BatchPredictRequest(BaseModel):
 class PredictionResult(BaseModel):
     label: str = Field(..., examples=["POSITIVE"])
     score: float = Field(..., ge=0.0, le=1.0, examples=[0.9998])
-    scores: dict[str, float] = Field(
-        ..., examples=[{"NEGATIVE": 0.0002, "POSITIVE": 0.9998}]
-    )
+    scores: dict[str, float] = Field(..., examples=[{"NEGATIVE": 0.0002, "POSITIVE": 0.9998}])
 
 
 class PredictResponse(PredictionResult):
