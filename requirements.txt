@@ -1,6 +1,7 @@
-fastapi
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpufastapi
 uvicorn
 gunicorn
 transformers
 torch
 pydantic-settings
+uvicorn-worker
