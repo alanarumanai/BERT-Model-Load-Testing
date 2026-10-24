@@ -1,0 +1,41 @@
+"""Service settings, read from environment variables (prefix APP_) or a .env file."""
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=".env",
+        extra="ignore",
+        # Allow field names starting with "model_" without Pydantic warnings.
+        protected_namespaces=("settings_",),
+    )
+
+    # Which model to load. Set APP_MODEL_REVISION to the commit hash you pinned,
+    # so the exact same weights are used on every machine.
+    model_name: str = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+    model_revision: str = "main"
+
+    # Inputs longer than this many tokens are truncated. SST-2 sentences are short,
+    # so 128 covers almost all real inputs while capping the cost of long ones.
+    max_length: int = Field(default=128, ge=8, le=512)
+
+    # Requests are rejected (422) before tokenization if they exceed these limits.
+    max_text_chars: int = Field(default=5000, ge=1)
+    max_batch_size: int = Field(default=32, ge=1)
+
+    # PyTorch intra-op threads per worker process. None keeps PyTorch's default
+    # (all cores), which oversubscribes the CPU when several workers run.
+    torch_num_threads: int | None = Field(default=None, ge=1)
+
+    log_level: str = "INFO"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the settings, created once per process."""
+    return Settings()
