@@ -9,9 +9,10 @@ Usage:
   python profiling/check_accuracy.py --variants baseline quantized max_length=64 \\
       quantized+max_length=64
 
-Variant names: "baseline" (current settings), "quantized", "max_length=N", or several
-joined with "+". The dataset is downloaded once from the Hugging Face Hub, so run this
-without HF_HUB_OFFLINE the first time.
+Variant names: "baseline" (current settings), "quantized", "bf16", "fp16",
+"max_length=N", or several joined with "+" (e.g. "bf16+max_length=64").
+The dataset is downloaded once from the Hugging Face Hub, so run this without
+HF_HUB_OFFLINE the first time.
 """
 
 import argparse
@@ -52,6 +53,8 @@ def parse_variant(name: str) -> dict:
             continue
         if part == "quantized":
             options["quantize"] = True
+        elif part in ("bf16", "fp16"):
+            options["precision"] = part
         elif part.startswith("max_length="):
             options["max_length"] = int(part.split("=", 1)[1])
         else:
@@ -67,7 +70,11 @@ def model_size_mb(model: torch.nn.Module) -> float:
 
 def evaluate(name: str, sentences: list[str], latency_samples: int) -> dict:
     settings = get_settings()
-    options = {"max_length": settings.max_length, "quantize": settings.quantize}
+    options = {
+        "max_length": settings.max_length,
+        "quantize": settings.quantize,
+        "precision": settings.precision,
+    }
     options.update(parse_variant(name))
     classifier = SentimentClassifier(
         model_name=settings.model_name,
@@ -102,7 +109,7 @@ def evaluate(name: str, sentences: list[str], latency_samples: int) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--variants", nargs="+", default=["baseline", "quantized", "max_length=64"])
+    parser.add_argument("--variants", nargs="+", default=["baseline", "quantized", "bf16", "fp16"])
     parser.add_argument("--limit", type=int, help="use only the first N sentences")
     parser.add_argument("--latency-samples", type=int, default=200)
     args = parser.parse_args()

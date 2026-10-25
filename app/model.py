@@ -10,6 +10,9 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
+# Settings value -> PyTorch number format.
+DTYPES = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}
+
 
 @dataclass(frozen=True)
 class Prediction:
@@ -38,7 +41,13 @@ class SentimentClassifier:
         num_threads: int | None = None,
         quantize: bool = False,
         max_concurrent: int | None = None,
+        precision: str = "fp32",
     ) -> None:
+        if precision not in DTYPES:
+            raise ValueError(f"precision must be one of {sorted(DTYPES)}, not {precision!r}")
+        if quantize and precision != "fp32":
+            # Dynamic quantization works on FP32 Linear layers only.
+            raise ValueError("quantize cannot be combined with precision bf16 or fp16")
         if num_threads is not None:
             torch.set_num_threads(num_threads)
 
@@ -56,6 +65,11 @@ class SentimentClassifier:
         if quantize:
             self.model = quantize_dynamic(self.model)
             self.model_id += "+int8"  # responses show which variant answered
+        elif precision != "fp32":
+            # Convert every weight (embeddings included) to the 16-bit format.
+            self.model = self.model.to(DTYPES[precision])
+            self.model_id += f"+{precision}"
+        self.precision = precision
 
         # Label names come from the model's own config, not hardcoded strings,
         # so any sequence-classification checkpoint works unchanged.
@@ -71,13 +85,14 @@ class SentimentClassifier:
 
         logger.info(
             "Loaded %s in %.1fs (labels=%s, torch threads=%d, max_length=%d, "
-            "quantized=%s, max_concurrent=%s)",
+            "quantized=%s, precision=%s, max_concurrent=%s)",
             self.model_id,
             time.perf_counter() - started,
             self.labels,
             torch.get_num_threads(),
             self.max_length,
             quantize,
+            precision,
             max_concurrent,
         )
 
@@ -112,7 +127,9 @@ class SentimentClassifier:
             return self.model(**inputs).logits
 
     def postprocess(self, logits: torch.Tensor) -> list[Prediction]:
-        probabilities = torch.softmax(logits, dim=-1).tolist()
+        # .float(): with bf16/fp16 models, compute the probabilities in FP32 so the
+        # reported scores keep full precision. A no-op for FP32 models.
+        probabilities = torch.softmax(logits.float(), dim=-1).tolist()
         predictions = []
         for row in probabilities:
             best = max(range(len(row)), key=row.__getitem__)

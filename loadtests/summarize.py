@@ -29,6 +29,7 @@ COLUMNS = [
     ("max_ms", "Max ms"),
     ("server_cpu_pct", "Server CPU %"),
     ("worker_rss_max_mb", "Worker RSS max MB"),
+    ("server_rss_max_mb", "Server RSS max MB"),
     ("steal_pct", "Steal %"),
     ("locust_cpu_max_pct", "Locust CPU max %"),
 ]
@@ -66,13 +67,16 @@ def resource_totals(run_dir: Path, cpus: int | None) -> dict:
     if not rows:
         return {}
 
+    # Add up the master and all workers at each sampling moment.
     server_cpu_by_time: dict[str, float] = {}
+    server_rss_by_time: dict[str, float] = {}
     for r in rows:
         if r["role"] in ("master", "worker"):
             moment = r["timestamp"]
             server_cpu_by_time[moment] = server_cpu_by_time.get(moment, 0.0) + float(
                 r["cpu_percent"]
             )
+            server_rss_by_time[moment] = server_rss_by_time.get(moment, 0.0) + float(r["rss_mb"])
     worker_rss = [float(r["rss_mb"]) for r in rows if r["role"] == "worker"]
     steal = [float(r["steal_percent"]) for r in rows if r["role"] == "system"]
     locust_cpu = [float(r["cpu_percent"]) for r in rows if r["role"] == "locust"]
@@ -83,6 +87,10 @@ def resource_totals(run_dir: Path, cpus: int | None) -> dict:
         result["server_cpu_pct"] = round(mean(server_cpu_by_time.values()) / cpus, 1)
     if worker_rss:
         result["worker_rss_max_mb"] = round(max(worker_rss))
+    if server_rss_by_time:
+        # The whole service's memory at its highest moment (shared libraries are
+        # counted once per process, so this slightly overstates the true total).
+        result["server_rss_max_mb"] = round(max(server_rss_by_time.values()))
     if steal:
         result["steal_pct"] = round(mean(steal), 1)
     if locust_cpu:

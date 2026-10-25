@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the load-test scenarios against a freshly started server and save everything
-# (Locust results, resource samples, server log, environment details, summary) into
+# (Locust results, resource samples, server log, startup time and idle memory,
+# environment details, summary) into
 # loadtests/results/<date-time>_<label>/.
 #
 # Usage:  bash loadtests/run_load_tests.sh [SCENARIO ...]
@@ -89,6 +90,7 @@ python -m pip freeze > "$SESSION/environment/pip-freeze.txt"
 # --- 2. Start the server and wait until every worker has loaded the model -------------
 # Each worker logs "Application startup complete" once its lifespan (model loading) is
 # done. That line comes from Gunicorn/Uvicorn, so it appears whatever APP_LOG_LEVEL is.
+server_start=$(date +%s.%N)
 bash scripts/run_server.sh "$SERVER_CPUS" > "$SESSION/server.log" 2>&1 &
 MASTER=$!   # run_server.sh uses exec, so this is the Gunicorn master's PID
 MONITOR=""
@@ -104,14 +106,34 @@ deadline=$((SECONDS + 300))
 until curl -sf "$HOST/health" >/dev/null; do
   kill -0 "$MASTER" 2>/dev/null || fail "server exited during startup"
   (( SECONDS < deadline )) || fail "server not healthy within 300s"
-  sleep 1
+  sleep 0.2
 done
+first_ready=$(date +%s.%N)
 expected=$(grep -oE 'Starting [0-9]+ worker' "$SESSION/server.log" | grep -oE '[0-9]+' | head -1 || true)
 while (( $(grep -c 'Application startup complete' "$SESSION/server.log" || true) < ${expected:-1} )); do
   (( SECONDS < deadline )) || fail "not all workers loaded within 300s"
-  sleep 1
+  sleep 0.2
 done
+all_ready=$(date +%s.%N)
 grep -m1 'Starting [0-9]* worker' "$SESSION/server.log" | sed 's/.*\] /Server: /' || true
+
+# Record startup time and idle memory (the same figures as scripts/measure_startup.sh).
+sleep 2   # let memory settle
+{
+  echo "=== Startup ==="
+  grep -m1 'Starting [0-9]* worker' "$SESSION/server.log" | sed 's/.*\] //' || true
+  awk -v s="$server_start" -v a="$first_ready" -v b="$all_ready" 'BEGIN {
+    printf "First worker ready (health 200): %.1f s\nAll workers ready:               %.1f s\n", a-s, b-s }'
+  echo "Per-worker model load (from the app's INFO logs; empty if APP_LOG_LEVEL hides them):"
+  grep 'Loaded ' "$SESSION/server.log" \
+    | sed -E 's/.*\[([0-9]+)\].*Loaded .* in ([0-9.]+s).*torch threads=([0-9]+).*/  worker \1: \2, torch threads=\3/' || true
+  echo
+  echo "=== Idle memory (RSS) before any load ==="
+  ps -o pid=,rss= -p "$MASTER" | awk '{ printf "  master %s: %6.1f MB\n", $1, $2/1024 }'
+  ps -o pid=,rss= --ppid "$MASTER" | awk '{ printf "  worker %s: %6.1f MB\n", $1, $2/1024; t += $2; n++ }
+    END { if (n) printf "  workers total: %.1f MB (%d workers, avg %.1f MB)\n", t/1024, n, t/1024/n }'
+} > "$SESSION/startup.txt"
+sed -n 's/^All workers ready: */Startup: all workers ready in /p' "$SESSION/startup.txt"
 
 # --- 3. Warm up: a short untimed run so caches and connections are ready -------------
 echo "[$(date +%T)] warm-up: 4 users for 20s (not recorded)"

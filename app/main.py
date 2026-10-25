@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
         max_length=settings.max_length,
         num_threads=settings.torch_num_threads,
         quantize=settings.quantize,
+        precision=settings.precision,
         max_concurrent=settings.max_concurrent_predictions,
     )
     yield

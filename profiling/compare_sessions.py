@@ -21,6 +21,7 @@ METRICS = [
     ("failure_pct", "Fail %", False),
     ("server_cpu_pct", "Server CPU %", None),
     ("worker_rss_max_mb", "Worker RSS MB", False),
+    ("server_rss_max_mb", "Server RSS MB", False),
 ]
 
 

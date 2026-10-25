@@ -1,6 +1,7 @@
 """Service settings, read from environment variables (prefix APP_) or a .env file."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,9 @@ class Settings(BaseSettings):
     # Phase 7 experiments, both off by default.
     # Convert the model's Linear layers to 8-bit integers (dynamic quantization).
     quantize: bool = False
+    # Number format for the whole model: fp32 (default), bf16 or fp16. The 16-bit
+    # formats halve the memory of every weight. Cannot be combined with quantize.
+    precision: Literal["fp32", "bf16", "fp16"] = "fp32"
     # At most this many predictions run at once in each worker; extra requests wait
     # their turn. None means no limit (FastAPI's thread pool runs them in parallel).
     max_concurrent_predictions: int | None = Field(default=None, ge=1)

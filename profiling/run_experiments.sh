@@ -27,7 +27,7 @@ export STEP_DURATION="${STEP_DURATION:-90s}"
 SCENARIOS="${SCENARIOS:-step}"
 
 # Settings left over in the shell would silently change every experiment.
-leftover=$(env | grep -E '^(GUNICORN_WORKERS|APP_TORCH_NUM_THREADS|APP_QUANTIZE|APP_MAX_LENGTH|APP_MAX_CONCURRENT_PREDICTIONS|APP_LOG_LEVEL|OMP_NUM_THREADS|OMP_WAIT_POLICY)=' || true)
+leftover=$(env | grep -E '^(GUNICORN_WORKERS|APP_TORCH_NUM_THREADS|APP_QUANTIZE|APP_MAX_LENGTH|APP_MAX_CONCURRENT_PREDICTIONS|APP_LOG_LEVEL|APP_PRECISION|OMP_NUM_THREADS|OMP_WAIT_POLICY)=' || true)
 if [[ -n "$leftover" ]]; then
   echo "ERROR: these variables are set in your shell and would affect every experiment:"
   echo "$leftover"
@@ -58,6 +58,8 @@ EXPERIMENTS=(
   "workers-${N}x1|GUNICORN_WORKERS=$N APP_TORCH_NUM_THREADS=1"
   "one-at-a-time|APP_MAX_CONCURRENT_PREDICTIONS=1"
   "quantized|APP_QUANTIZE=true"
+  "bf16|APP_PRECISION=bf16"
+  "fp16|APP_PRECISION=fp16"
   "max-length-64|APP_MAX_LENGTH=64"
   "quiet-logs|APP_LOG_LEVEL=WARNING"
 )
@@ -65,12 +67,24 @@ EXPERIMENTS=(
 SELECTED=()
 for arg in "$@"; do
   if [[ "$arg" == *"|"* ]]; then
-    EXPERIMENTS+=("$arg")          # a custom experiment: "name|settings"
+    # A custom experiment: "name|settings". If it has the same name as a built-in
+    # one, it replaces it, so each name runs exactly once.
+    kept=()
+    for entry in "${EXPERIMENTS[@]}"; do
+      [[ "${entry%%|*}" == "${arg%%|*}" ]] || kept+=("$entry")
+    done
+    EXPERIMENTS=("${kept[@]}" "$arg")
     SELECTED+=("${arg%%|*}")
   else
     SELECTED+=("$arg")
   fi
 done
+# Drop repeated names, keeping the first occurrence.
+unique=()
+for name in "${SELECTED[@]}"; do
+  [[ " ${unique[*]} " == *" $name "* ]] || unique+=("$name")
+done
+SELECTED=("${unique[@]}")
 names=()
 for entry in "${EXPERIMENTS[@]}"; do names+=("${entry%%|*}"); done
 if [[ ${#SELECTED[@]} -eq 0 ]]; then
@@ -102,6 +116,7 @@ for name in "${SELECTED[@]}"; do
       echo "WARNING: experiment '$name' failed; continuing with the rest."
       failed+=("$name")
     fi
+    break   # each name runs once
   done
 done
 

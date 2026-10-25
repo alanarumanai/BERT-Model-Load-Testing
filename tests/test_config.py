@@ -35,6 +35,7 @@ def test_defaults():
     assert settings.log_level == "INFO"
     assert settings.quantize is False
     assert settings.max_concurrent_predictions is None
+    assert settings.precision == "fp32"
 
 
 def test_environment_variables_override_defaults(monkeypatch):
@@ -52,11 +53,13 @@ def test_environment_variables_override_defaults(monkeypatch):
 def test_experiment_settings_from_environment(monkeypatch):
     monkeypatch.setenv("APP_QUANTIZE", "true")
     monkeypatch.setenv("APP_MAX_CONCURRENT_PREDICTIONS", "1")
+    monkeypatch.setenv("APP_PRECISION", "bf16")
 
     settings = make_settings()
 
     assert settings.quantize is True  # the text "true" becomes a real boolean
     assert settings.max_concurrent_predictions == 1
+    assert settings.precision == "bf16"
 
 
 def test_reads_env_file(tmp_path):
@@ -87,6 +90,7 @@ def test_environment_variable_beats_env_file(tmp_path, monkeypatch):
         ("APP_MAX_LENGTH", "not-a-number"),
         ("APP_MAX_CONCURRENT_PREDICTIONS", "0"),
         ("APP_QUANTIZE", "maybe"),
+        ("APP_PRECISION", "int4"),
     ],
 )
 def test_invalid_values_are_rejected(monkeypatch, variable, value):
