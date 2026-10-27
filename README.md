@@ -174,12 +174,11 @@ loadtests/            Locust file, texts, resource monitor, session runner, summ
 profiling/            experiment runner, stage timings, flame graphs, accuracy, comparisons, results
 report/               the report (REPORT.md, REPORT.pdf) and its figures
 docs/decisions.md     design decisions, with reasons and evidence
+REPRODUCE.md          every step needed to reproduce the report
 .github/workflows/    CI pipeline
 ```
 
 ## Reproducing the report
 
-Follow "How to reproduce" in [`report/REPORT.md`](report/REPORT.md). Every figure's caption names
-the result file it came from, and every session folder records its hardware, packages, settings
-and code version in `environment/`. Absolute numbers depend on the CPU, so on other hardware
-compare configurations with each other rather than with the figures in the report.
+[`REPRODUCE.md`](REPRODUCE.md) lists every command, stage by stage, in the order the results were
+produced, with where to compare each output with the report and how to troubleshoot.
