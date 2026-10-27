@@ -1,5 +1,6 @@
 *.pyc
 .venv/
+__pycache__/
 .python-version
 launch.json
 settings.json
@@ -7,3 +8,10 @@ tasks.json
 .coverage
 loadtests/results/
 profiling/results/
+.env
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+test-results.xml
+htmlcov/
+report/REPORT.html

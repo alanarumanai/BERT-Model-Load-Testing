@@ -73,9 +73,11 @@ echo "Results folder: $SESSION"
     echo "$var=${!var}"
   done
   echo "--- server and model settings from the environment ---"
-  env | grep -E '^(GUNICORN_|APP_|HF_|TOKENIZERS_|OMP_|KMP_|GOMP_|MKL_)' | sort || true
+  env | grep -E '^(PROFILE|GUNICORN_|APP_|HF_|TOKENIZERS_|OMP_|KMP_|GOMP_|MKL_)' | sort || true
 } > "$SESSION/environment/settings.txt"
 [[ -f .env ]] && grep -E '^[[:space:]]*APP_' .env > "$SESSION/environment/dotenv_app_settings.txt" || true
+# A settings profile (PROFILE=throughput) is applied by run_server.sh; keep a copy.
+[[ -n "${PROFILE:-}" && -f "profiles/${PROFILE}.env" ]] && cp "profiles/${PROFILE}.env" "$SESSION/environment/profile_${PROFILE}.env" || true
 lscpu > "$SESSION/environment/lscpu.txt" 2>&1 || true
 free -h > "$SESSION/environment/memory.txt" 2>&1 || true
 cat /etc/os-release > "$SESSION/environment/os-release.txt" 2>&1 || true
