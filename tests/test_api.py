@@ -122,16 +122,23 @@ def test_health_when_model_loaded(client, classifier):
     assert response.json() == {"status": "ok", "model_loaded": True, "model": classifier.model_id}
 
 
-def test_not_ready_without_model(client, monkeypatch):
+def test_not_ready_without_model(client):
     # Simulate the moment before the lifespan has finished loading the model.
-    monkeypatch.setattr(client.app.state, "classifier", None)
+    # Restored by hand rather than with monkeypatch: Starlette's State keeps its
+    # attributes outside __dict__, so pytest >= 9.2's monkeypatch deletes the
+    # attribute on undo instead of restoring it, which broke every later test.
+    state = client.app.state
+    loaded = state.classifier
+    state.classifier = None
+    try:
+        health = client.get("/health")
+        assert health.status_code == 503
+        assert health.json() == {"status": "loading", "model_loaded": False, "model": None}
 
-    health = client.get("/health")
-    assert health.status_code == 503
-    assert health.json() == {"status": "loading", "model_loaded": False, "model": None}
-
-    assert client.post("/predict", json={"text": POSITIVE}).status_code == 503
-    assert client.post("/predict/batch", json={"texts": [POSITIVE]}).status_code == 503
+        assert client.post("/predict", json={"text": POSITIVE}).status_code == 503
+        assert client.post("/predict/batch", json={"texts": [POSITIVE]}).status_code == 503
+    finally:
+        state.classifier = loaded
 
 
 # --- Errors, headers and docs -----------------------------------------------------
